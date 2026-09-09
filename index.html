@@ -87,8 +87,12 @@
   svg.link polyline{fill:none; stroke:var(--ink); stroke-width:5; stroke-linecap:round; stroke-linejoin:round; opacity:.85}
 
   footer{display:flex; align-items:center; justify-content:space-between; gap:8px}
-  .range{font-size:12px; color:var(--mute); font-variant-numeric:tabular-nums}
+  .range{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--mute); font-variant-numeric:tabular-nums}
   .range b{color:var(--ink); font-weight:600}
+  .goal{
+    display:inline-flex; align-items:center; justify-content:center; min-width:40px; height:24px; padding:0 8px; border-radius:6px;
+    font-family:"Barlow Condensed",Barlow,sans-serif; font-weight:700; font-size:16px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.35)
+  }
   .btns{display:flex; gap:6px}
   button{
     font:inherit; font-weight:600; font-size:13px; color:var(--ink); background:var(--panel);
@@ -144,7 +148,7 @@
   </div>
 
   <footer>
-    <div class="range">Lowest <b id="lo">16</b> · Highest <b id="hiV">128</b></div>
+    <div class="range">Goal <span class="goal" id="goal">256</span> · Lowest <b id="lo">16</b></div>
     <div class="btns">
       <button id="mute" aria-label="Sound on" title="Toggle sound">🔊</button>
       <button id="undo" disabled>Undo</button>
@@ -166,7 +170,7 @@
 
   let cell = 64;
   let tiles = [], grid = [], nextId = 1;
-  let score = 0, best = 0, minExp = START;
+  let score = 0, best = 0, minExp = START, goalExp = START + 4; // first goal is 256
   let chain = [], dragging = false, busy = false, over = false, history = null;
 
   // ---------- helpers ----------
@@ -298,7 +302,7 @@
   function newGame() {
     tiles.forEach(t => t.el.remove());
     tiles = []; grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
-    score = 0; minExp = START; chain = []; history = null; over = false; busy = false;
+    score = 0; minExp = START; goalExp = START + 4; chain = []; history = null; over = false; busy = false;
     $('over').classList.remove('show'); $('undo').disabled = true;
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
       const roll = Math.random();
@@ -314,7 +318,7 @@
     $('score').textContent = score;
     $('best').textContent = best;
     $('lo').textContent = 2 ** minExp;
-    $('hiV').textContent = 2 ** maxExp();
+    const g = $('goal'); g.textContent = 2 ** goalExp; g.style.background = colorFor(2 ** goalExp);
   }
   function showHint(text) {
     statusEl.classList.remove('toast');
@@ -403,7 +407,7 @@
 
   // ---------- game flow ----------
   function snapshot() {
-    history = { tiles: tiles.map(t => ({ v: t.v, r: t.r, c: t.c })), score, minExp };
+    history = { tiles: tiles.map(t => ({ v: t.v, r: t.r, c: t.c })), score, minExp, goalExp };
     $('undo').disabled = false;
   }
   function undo() {
@@ -411,7 +415,7 @@
     tiles.forEach(t => t.el.remove());
     tiles = []; grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
     for (const s of history.tiles) makeTile(s.v, s.r, s.c);
-    score = history.score; minExp = history.minExp; history = null; over = false;
+    score = history.score; minExp = history.minExp; goalExp = history.goalExp; history = null; over = false;
     $('over').classList.remove('show'); $('undo').disabled = true;
     chain = []; markChain(); renderHud(); showHint();
   }
@@ -441,7 +445,7 @@
     await wait(180);
     target.el.classList.remove('pop');
 
-    await raiseFloor();
+    await reachGoal();
     await gravity();
     await refill();
     renderHud();
@@ -449,17 +453,20 @@
     if (!hasMoves()) gameOver();
   }
 
-  async function raiseFloor() {
-    const newMin = Math.max(START, maxExp() - 8);
-    if (newMin <= minExp) return;
-    const old = minExp; minExp = newMin;
-    const gone = tiles.filter(t => exp(t.v) < minExp);
-    if (!gone.length) return;
-    showToast(`You reached ${2 ** maxExp()}. Every ${old === minExp - 1 ? 2 ** old : 'tile below ' + 2 ** minExp} leaves the board.`);
-    sfx.floor();
-    gone.forEach(t => t.el.classList.add('out'));
-    await wait(220);
-    gone.forEach(removeTile);
+  // Reaching the goal clears every tile of the lowest value and doubles the goal.
+  async function reachGoal() {
+    while (maxExp() >= goalExp) {
+      const reached = 2 ** goalExp, cleared = 2 ** minExp;
+      goalExp++; minExp++;
+      const gone = tiles.filter(t => exp(t.v) < minExp);
+      renderHud();
+      showToast(`${reached} reached. Every ${cleared} cleared. Next goal ${2 ** goalExp}.`);
+      sfx.floor();
+      gone.forEach(t => t.el.classList.add('out'));
+      await wait(260);
+      gone.forEach(removeTile);
+      await wait(120);
+    }
   }
 
   async function gravity() {

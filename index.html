@@ -128,7 +128,7 @@
     </div>
   </header>
 
-  <div class="status" id="status"><span class="hint">Drag through equal tiles. Each next tile may also be double the last.</span></div>
+  <div class="status" id="status"><span class="hint">Drag through two equal tiles. After that, each next tile may be equal or double.</span></div>
 
   <div class="board" id="board">
     <div class="cells" id="cells"></div>
@@ -318,16 +318,16 @@
   }
   function showHint(text) {
     statusEl.classList.remove('toast');
-    statusEl.innerHTML = `<span class="hint">${text || 'Drag through equal tiles. Each next tile may also be double the last.'}</span>`;
+    statusEl.innerHTML = `<span class="hint">${text || 'Drag through two equal tiles. After that, each next tile may be equal or double.'}</span>`;
   }
   function showToast(text) {
     statusEl.classList.add('toast');
     statusEl.innerHTML = `<span class="hint">${text}</span>`;
   }
   function showChain() {
-    if (chain.length < 2) { showHint(chain.length ? 'Keep going: the next tile must be ' + chain[0].v + ' or ' + chain[0].v * 2 : ''); return; }
+    if (chain.length < 2) { showHint(chain.length ? 'Now drag to a neighbouring ' + chain[0].v : ''); return; }
     const sum = chain.reduce((a, t) => a + t.v, 0);
-    const res = 2 ** Math.floor(Math.log2(sum));
+    const res = 2 ** Math.ceil(Math.log2(sum));
     const terms = chain.map(t => t.v).join(' + ');
     statusEl.classList.remove('toast');
     statusEl.innerHTML = `<span class="sum">${terms} = ${sum}</span><span class="res" style="background:${colorFor(res)}">${res}</span>`;
@@ -353,7 +353,7 @@
     return grid[r][c];
   }
   const adjacent = (a, b) => Math.abs(a.r - b.r) <= 1 && Math.abs(a.c - b.c) <= 1;
-  const canFollow = (prev, next) => next.v === prev.v || next.v === prev.v * 2;
+  const canFollow = (prev, next, len) => next.v === prev.v || (len >= 2 && next.v === prev.v * 2);
 
   let lastPt = null;
   function tryExtend(pt) {
@@ -362,7 +362,7 @@
     if (t === last) return;
     if (chain.length >= 2 && t === chain[chain.length - 2]) { chain.pop(); markChain(); sfx.unlink(); return; }
     if (chain.includes(t)) return;
-    if (adjacent(t, last) && canFollow(last, t)) { chain.push(t); markChain(); sfx.link(chain.length); }
+    if (adjacent(t, last) && canFollow(last, t, chain.length)) { chain.push(t); markChain(); sfx.link(chain.length); }
   }
   function startDrag(pt) {
     if (busy || over) return;
@@ -422,7 +422,7 @@
     snapshot();
     const target = chain[chain.length - 1];
     const sum = chain.reduce((a, t) => a + t.v, 0);
-    const result = 2 ** Math.floor(Math.log2(sum));
+    const result = 2 ** Math.ceil(Math.log2(sum));
     const rest = chain.slice(0, -1);
     const links = chain.length;
     const mult = links >= 8 ? 3 : links >= 5 ? 2 : 1; // long chains pay more
@@ -437,7 +437,7 @@
     showPoints(target, gained, mult);
     if (score > best) { best = score; try { localStorage.setItem('best2248', best); } catch (e) {} }
     renderHud(); showChain();
-    showHint(`${sum} rounds down to <b style="color:var(--ink)">${result}</b>`);
+    showHint(sum === result ? `${sum} exactly` : `${sum} rounds up to <b style="color:var(--ink)">${result}</b>`);
     await wait(180);
     target.el.classList.remove('pop');
 
@@ -498,7 +498,7 @@
       for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
         if (!dr && !dc) continue;
         const n = grid[t.r + dr]?.[t.c + dc];
-        if (n && (canFollow(t, n) || canFollow(n, t))) return true;
+        if (n && n.v === t.v) return true;
       }
     }
     return false;

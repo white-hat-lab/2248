@@ -93,6 +93,15 @@
     display:inline-flex; align-items:center; justify-content:center; min-width:40px; height:24px; padding:0 8px; border-radius:6px;
     font-family:"Barlow Condensed",Barlow,sans-serif; font-weight:700; font-size:16px; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.35)
   }
+  .tools{display:flex; gap:6px}
+  .tools button{flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:8px 6px}
+  .tools button b{
+    min-width:20px; height:20px; padding:0 6px; border-radius:10px; background:var(--line); color:var(--ink);
+    font-size:12px; line-height:20px; font-variant-numeric:tabular-nums
+  }
+  .tools button.armed{border-color:var(--accent); color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset}
+  .tools button.armed b{background:var(--accent); color:#1a1508}
+  .tile.pick{box-shadow:0 0 0 3px var(--accent), 0 6px 18px rgba(0,0,0,.4); z-index:2; scale:.94}
   .btns{display:flex; gap:6px}
   button{
     font:inherit; font-weight:600; font-size:13px; color:var(--ink); background:var(--panel);
@@ -147,6 +156,12 @@
     </div>
   </div>
 
+  <div class="tools">
+    <button id="hammer" title="Remove one tile">🔨 Smash <b>2</b></button>
+    <button id="swap" title="Swap two neighbouring tiles">🔁 Swap <b>2</b></button>
+    <button id="shuffle" title="Rearrange the whole board">🔀 Shuffle <b>2</b></button>
+  </div>
+
   <footer>
     <div class="range">Goal <span class="goal" id="goal">256</span> · Lowest <b id="lo">16</b></div>
     <div class="btns">
@@ -172,6 +187,7 @@
   let tiles = [], grid = [], nextId = 1;
   let score = 0, best = 0, minExp = START, goalExp = START + 4; // first goal is 256
   let chain = [], dragging = false, busy = false, over = false, history = null;
+  let tools = { hammer: 2, swap: 2, shuffle: 2 }, armed = null, swapFirst = null;
 
   // ---------- helpers ----------
   const wait = ms => new Promise(r => setTimeout(r, reduced ? 0 : ms));
@@ -182,7 +198,16 @@
     const l = 54 - cyc * 8, s = 70 + cyc * 8;
     return `linear-gradient(160deg, hsl(${h} ${s}% ${l + 6}%), hsl(${h} ${s + 6}% ${l - 8}%))`;
   };
-  const digitsClass = v => { const d = String(v).length; return d >= 6 ? 'd6' : d >= 3 ? 'd' + d : ''; };
+  // 16384 -> 16K, 1048576 -> 1M, then B, T, AA, AB ... like the original game
+  const UNITS = ['K', 'M', 'B', 'T'];
+  for (let i = 0; i < 26; i++) UNITS.push('A' + String.fromCharCode(65 + i));
+  const label = v => {
+    if (v < 10000) return String(v);
+    let x = v, k = -1;
+    while (x >= 1000 && k < UNITS.length - 1) { x /= 1000; k++; }
+    return Math.floor(x) + UNITS[k];
+  };
+  const digitsClass = v => { const d = label(v).length; return d >= 6 ? 'd6' : d >= 3 ? 'd' + d : ''; };
 
   try { best = Number(localStorage.getItem('best2248')) || 0; } catch (e) {}
 
@@ -237,6 +262,9 @@
     },
     land:  () => noise(0.09, 0.35, 700),
     floor: () => { tone('sawtooth', 900, 120, 0.4, 0.08); noise(0.35, 0.2, 1200); },
+    smash: () => { noise(0.18, 0.5, 400); tone('square', 160, 60, 0.15, 0.1); },
+    swap:  () => { tone('triangle', 500, 700, 0.08, 0.12); tone('triangle', 700, 500, 0.08, 0.12, 0.09); },
+    shuffle: () => { for (let i = 0; i < 6; i++) tone('triangle', 300 + Math.random() * 500, 400, 0.05, 0.08, i * 0.04); },
     over:  () => { [330, 262, 196, 131].forEach((f, i) => tone('square', f, f * 0.97, 0.28, 0.07, i * 0.18)); },
   };
   const muteBtn = $('mute');
@@ -278,7 +306,7 @@
     return t;
   }
   function paint(t) {
-    t.el.textContent = t.v;
+    t.el.textContent = label(t.v);
     t.el.style.background = colorFor(t.v);
     t.el.className = 'tile ' + digitsClass(t.v) + (exp(t.v) > HUES.length ? ' hi' : '') + (chain.includes(t) ? ' sel' : '');
   }
@@ -303,6 +331,7 @@
     tiles.forEach(t => t.el.remove());
     tiles = []; grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
     score = 0; minExp = START; goalExp = START + 4; chain = []; history = null; over = false; busy = false;
+    tools = { hammer: 2, swap: 2, shuffle: 2 }; armed = null; swapFirst = null;
     $('over').classList.remove('show'); $('undo').disabled = true;
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
       const roll = Math.random();
@@ -317,8 +346,9 @@
   function renderHud() {
     $('score').textContent = score;
     $('best').textContent = best;
-    $('lo').textContent = 2 ** minExp;
-    const g = $('goal'); g.textContent = 2 ** goalExp; g.style.background = colorFor(2 ** goalExp);
+    $('lo').textContent = label(2 ** minExp);
+    const g = $('goal'); g.textContent = label(2 ** goalExp); g.style.background = colorFor(2 ** goalExp);
+    renderTools();
   }
   function showHint(text) {
     statusEl.classList.remove('toast');
@@ -329,12 +359,12 @@
     statusEl.innerHTML = `<span class="hint">${text}</span>`;
   }
   function showChain() {
-    if (chain.length < 2) { showHint(chain.length ? 'Now drag to a neighbouring ' + chain[0].v : ''); return; }
+    if (chain.length < 2) { showHint(chain.length ? 'Now drag to a neighbouring ' + label(chain[0].v) : ''); return; }
     const sum = chain.reduce((a, t) => a + t.v, 0);
-    const res = 2 ** Math.ceil(Math.log2(sum));
-    const terms = chain.map(t => t.v).join(' + ');
+    const res = 2 ** Math.floor(Math.log2(sum));
+    const terms = chain.map(t => label(t.v)).join(' + ');
     statusEl.classList.remove('toast');
-    statusEl.innerHTML = `<span class="sum">${terms} = ${sum}</span><span class="res" style="background:${colorFor(res)}">${res}</span>`;
+    statusEl.innerHTML = `<span class="sum">${terms} = ${label(sum)}</span><span class="res" style="background:${colorFor(res)}">${label(res)}</span>`;
   }
 
   // ---------- chain drawing ----------
@@ -372,6 +402,8 @@
     if (busy || over) return;
     const t = tileAt(pt); if (!t) return;
     audio();
+    if (armed === 'hammer') { useHammer(t); return; }
+    if (armed === 'swap') { useSwap(t); return; }
     dragging = true; lastPt = pt; chain = [t]; markChain(); sfx.pick();
   }
   // A fast swipe delivers sparse move events, so walk the segment from the
@@ -407,7 +439,7 @@
 
   // ---------- game flow ----------
   function snapshot() {
-    history = { tiles: tiles.map(t => ({ v: t.v, r: t.r, c: t.c })), score, minExp, goalExp };
+    history = { tiles: tiles.map(t => ({ v: t.v, r: t.r, c: t.c })), score, minExp, goalExp, tools: { ...tools } };
     $('undo').disabled = false;
   }
   function undo() {
@@ -415,7 +447,8 @@
     tiles.forEach(t => t.el.remove());
     tiles = []; grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
     for (const s of history.tiles) makeTile(s.v, s.r, s.c);
-    score = history.score; minExp = history.minExp; goalExp = history.goalExp; history = null; over = false;
+    score = history.score; minExp = history.minExp; goalExp = history.goalExp; tools = history.tools; history = null; over = false;
+    armed = null; swapFirst = null;
     $('over').classList.remove('show'); $('undo').disabled = true;
     chain = []; markChain(); renderHud(); showHint();
   }
@@ -426,22 +459,19 @@
     snapshot();
     const target = chain[chain.length - 1];
     const sum = chain.reduce((a, t) => a + t.v, 0);
-    const result = 2 ** Math.ceil(Math.log2(sum));
+    const result = 2 ** Math.floor(Math.log2(sum));
     const rest = chain.slice(0, -1);
-    const links = chain.length;
-    const mult = links >= 8 ? 3 : links >= 5 ? 2 : 1; // long chains pay more
     chain = []; lineEl.setAttribute('points', '');
 
     for (const t of rest) { t.el.classList.remove('sel'); t.el.classList.add('fly'); t.el.style.transform = pos(target.r, target.c); }
     await wait(190);
     rest.forEach(removeTile);
     target.v = result; paint(target); target.el.classList.add('pop'); sfx.merge(result);
-    const gained = result * mult;
-    score += gained;
-    showPoints(target, gained, mult);
+    score += sum; // points are the sum of every tile in the chain
+    showPoints(target, sum);
     if (score > best) { best = score; try { localStorage.setItem('best2248', best); } catch (e) {} }
     renderHud(); showChain();
-    showHint(sum === result ? `${sum} exactly` : `${sum} rounds up to <b style="color:var(--ink)">${result}</b>`);
+    showHint(sum === result ? `${label(sum)} exactly, +${label(sum)} points` : `${label(sum)} rounds down to <b style="color:var(--ink)">${label(result)}</b>, +${label(sum)} points`);
     await wait(180);
     target.el.classList.remove('pop');
 
@@ -460,7 +490,8 @@
       goalExp++; minExp++;
       const gone = tiles.filter(t => exp(t.v) < minExp);
       renderHud();
-      showToast(`${reached} reached. Every ${cleared} cleared. Next goal ${2 ** goalExp}.`);
+      tools.hammer++; tools.swap++; tools.shuffle++;
+      showToast(`${label(reached)} reached. Every ${label(cleared)} cleared. Next goal ${label(2 ** goalExp)}. Boosters +1.`);
       sfx.floor();
       gone.forEach(t => t.el.classList.add('out'));
       await wait(260);
@@ -511,18 +542,80 @@
     return false;
   }
 
-  function showPoints(t, gained, mult) {
+  function showPoints(t, gained) {
     const el = document.createElement('div');
     el.className = 'pts';
-    el.innerHTML = `+${gained}${mult > 1 ? `<small>×${mult} chain</small>` : ''}`;
+    el.textContent = '+' + label(gained);
     el.style.transform = pos(t.r, t.c);
     boardEl.appendChild(el);
     setTimeout(() => el.remove(), 850);
     const sb = $('score'); sb.classList.remove('bump'); void sb.offsetWidth; sb.classList.add('bump');
   }
 
+  // ---------- boosters ----------
+  function renderTools() {
+    for (const k in tools) {
+      const b = $(k);
+      b.querySelector('b').textContent = tools[k];
+      b.disabled = tools[k] <= 0 && armed !== k;
+      b.classList.toggle('armed', armed === k);
+    }
+  }
+  function disarm() {
+    armed = null;
+    if (swapFirst) { swapFirst.el.classList.remove('pick'); swapFirst = null; }
+    renderTools(); showHint();
+  }
+  function arm(k) {
+    if (busy || over) return;
+    if (armed === k) { disarm(); return; }
+    if (tools[k] <= 0) return;
+    if (armed) disarm();
+    if (k === 'shuffle') { useShuffle(); return; }
+    armed = k; renderTools();
+    showHint(k === 'hammer' ? 'Tap a tile to smash it. Tap Smash again to cancel.' : 'Tap two neighbouring tiles to swap them.');
+  }
+  async function useHammer(t) {
+    busy = true; snapshot(); tools.hammer--; armed = null; renderTools(); sfx.smash();
+    t.el.classList.add('out');
+    await wait(220);
+    removeTile(t);
+    await gravity(); await refill();
+    renderHud(); showHint(); busy = false;
+    if (!hasMoves()) gameOver();
+  }
+  async function useSwap(t) {
+    if (!swapFirst) { swapFirst = t; t.el.classList.add('pick'); showHint('Now tap a tile next to ' + label(t.v) + '.'); return; }
+    if (t === swapFirst) { disarm(); return; }
+    if (!adjacent(t, swapFirst)) { showHint('Those are not neighbours. Tap a tile next to ' + label(swapFirst.v) + '.'); return; }
+    busy = true; snapshot(); tools.swap--;
+    const a = swapFirst; swapFirst = null; armed = null; a.el.classList.remove('pick'); renderTools();
+    const r = a.r, c = a.c;
+    a.r = t.r; a.c = t.c; t.r = r; t.c = c;
+    grid[a.r][a.c] = a; grid[t.r][t.c] = t;
+    a.el.style.transform = pos(a.r, a.c); t.el.style.transform = pos(t.r, t.c);
+    sfx.swap();
+    await wait(230);
+    showHint(); busy = false;
+    if (!hasMoves()) gameOver();
+  }
+  async function useShuffle() {
+    busy = true; snapshot(); tools.shuffle--; renderTools(); sfx.shuffle();
+    const cells = [];
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) cells.push([r, c]);
+    for (let i = cells.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [cells[i], cells[j]] = [cells[j], cells[i]]; }
+    grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    tiles.forEach((t, i) => { [t.r, t.c] = cells[i]; grid[t.r][t.c] = t; t.el.style.transform = pos(t.r, t.c); });
+    await wait(280);
+    showHint(); busy = false;
+    if (!hasMoves()) gameOver();
+  }
+  $('hammer').addEventListener('click', () => arm('hammer'));
+  $('swap').addEventListener('click', () => arm('swap'));
+  $('shuffle').addEventListener('click', () => arm('shuffle'));
+
   function gameOver() {
-    over = true; sfx.over();
+    over = true; sfx.over(); armed = null; swapFirst = null; renderTools();
     $('finalScore').textContent = score;
     $('over').classList.add('show');
   }

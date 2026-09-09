@@ -128,7 +128,7 @@
     </div>
   </header>
 
-  <div class="status" id="status"><span class="hint">Drag through two equal tiles. After that, each next tile may be equal or double.</span></div>
+  <div class="status" id="status"><span class="hint">Link two equal tiles, then keep adding equal or double tiles.</span></div>
 
   <div class="board" id="board">
     <div class="cells" id="cells"></div>
@@ -318,7 +318,7 @@
   }
   function showHint(text) {
     statusEl.classList.remove('toast');
-    statusEl.innerHTML = `<span class="hint">${text || 'Drag through two equal tiles. After that, each next tile may be equal or double.'}</span>`;
+    statusEl.innerHTML = `<span class="hint">${text || 'Link two equal tiles, then keep adding equal or double tiles.'}</span>`;
   }
   function showToast(text) {
     statusEl.classList.add('toast');

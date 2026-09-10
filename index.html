@@ -340,8 +340,33 @@
       makeTile(2 ** (START + e), r, c);
     }
     if (!hasMoves()) return newGame();
-    renderHud(); showHint();
+    renderHud(); showHint(); saveGame();
   }
+
+  // ---------- persistence: the game resumes where you left it ----------
+  const SAVE_KEY = 'game2248';
+  function saveGame() {
+    if (over) { try { localStorage.removeItem(SAVE_KEY); } catch (e) {} return; }
+    const data = { tiles: tiles.map(t => ({ v: t.v, r: t.r, c: t.c })), score, minExp, goalExp, tools, history };
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(data)); } catch (e) {}
+  }
+  function loadGame() {
+    let d = null;
+    try { d = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) {}
+    if (!d || !Array.isArray(d.tiles) || d.tiles.length !== ROWS * COLS) return false;
+    tiles.forEach(t => t.el.remove());
+    tiles = []; grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    for (const t of d.tiles) makeTile(t.v, t.r, t.c);
+    score = d.score || 0; minExp = d.minExp || START; goalExp = d.goalExp || START + GOAL_GAP;
+    tools = Object.assign({ hammer: 0, swap: 0, shuffle: 0 }, d.tools); history = d.history || null;
+    chain = []; armed = null; swapFirst = null; over = false; busy = false;
+    $('over').classList.remove('show'); $('undo').disabled = !history;
+    renderHud(); showHint();
+    if (!hasMoves()) gameOver();
+    return true;
+  }
+  addEventListener('pagehide', saveGame);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveGame(); });
 
   // ---------- HUD ----------
   function renderHud() {
@@ -451,7 +476,7 @@
     score = history.score; minExp = history.minExp; goalExp = history.goalExp; tools = history.tools; history = null; over = false;
     armed = null; swapFirst = null;
     $('over').classList.remove('show'); $('undo').disabled = true;
-    chain = []; markChain(); renderHud(); showHint();
+    chain = []; markChain(); renderHud(); showHint(); saveGame();
   }
 
   async function commitChain() {
@@ -482,6 +507,7 @@
     renderHud();
     busy = false;
     if (!hasMoves()) gameOver();
+    saveGame();
   }
 
   // Reaching the goal clears every tile of the lowest value and doubles the goal.
@@ -584,6 +610,7 @@
     await gravity(); await refill();
     renderHud(); showHint(); busy = false;
     if (!hasMoves()) gameOver();
+    saveGame();
   }
   async function useSwap(t) {
     if (!swapFirst) { swapFirst = t; t.el.classList.add('pick'); showHint('Now tap a tile next to ' + label(t.v) + '.'); return; }
@@ -599,6 +626,7 @@
     await wait(230);
     showHint(); busy = false;
     if (!hasMoves()) gameOver();
+    saveGame();
   }
   async function useShuffle() {
     busy = true; snapshot(); tools.shuffle--; renderTools(); sfx.shuffle();
@@ -610,6 +638,7 @@
     await wait(280);
     showHint(); busy = false;
     if (!hasMoves()) gameOver();
+    saveGame();
   }
   $('hammer').addEventListener('click', () => arm('hammer'));
   $('swap').addEventListener('click', () => arm('swap'));
@@ -619,6 +648,7 @@
     over = true; sfx.over(); armed = null; swapFirst = null; renderTools();
     $('finalScore').textContent = score;
     $('over').classList.add('show');
+    saveGame();
   }
 
   $('undo').addEventListener('click', undo);
@@ -626,7 +656,7 @@
   $('again').addEventListener('click', newGame);
 
   fit();
-  newGame();
+  if (!loadGame()) newGame();
 })();
 </script>
 </body>
